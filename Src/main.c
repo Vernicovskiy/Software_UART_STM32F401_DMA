@@ -1,4 +1,5 @@
 #include "main.h"
+#include "string.h"
 
 #define DMA_Stream DMA2_Stream5
 
@@ -8,6 +9,12 @@ volatile uint32_t  SysTick_Count = 0;
 
 
 uint16_t buf[SIZE] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0020};
+
+uint16_t buf1[SIZE] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0020};
+
+char *a = "Hello World\n";
+
+uint8_t i = 1;
 
 
 
@@ -86,10 +93,31 @@ void DMA2_Stream5_IRQHandler(void){
 
 	if (READ_BIT(DMA2->HISR, DMA_HISR_HTIF5)){
 
+		if(!(DMA_Stream->CR & DMA_SxCR_CT))
+		{
+			Data_Put(a+i, buf1);
+			i++;
+			if(i>(strlen(a)-1)) i = 0;
+		}
+		else if ((DMA_Stream->CR & DMA_SxCR_CT))
+		{
+			Data_Put(a+i, buf);
+			i++;
+			if(i>(strlen(a)-1)) i = 0;
+		}
+
+		DMA2->HIFCR |= DMA_HIFCR_CHTIF5; // очистили флаг
+
+
 
 	}
 
 	if ((READ_BIT(DMA2->HISR, DMA_HISR_TCIF5))){ // передача по 2 каналу завершена полностью
+
+		DMA2->HIFCR |= DMA_HIFCR_CTCIF5; // очистили флаг
+
+		TIM1->CNT = 0;
+
 
 
 		}
@@ -118,11 +146,14 @@ void DMA_Init(void){
 	DMA_Stream->CR |= DMA_SxCR_TCIE;
 	DMA_Stream->CR |= DMA_SxCR_TEIE;
 
+	DMA_Stream->CR |= DMA_SxCR_DBM;
+
+
 
 
 }
 
-void DMA_Config(uint32_t perih_address, uint32_t mem_address , uint16_t data_amount ){
+void DMA_Config(uint32_t perih_address, uint32_t mem_address , uint32_t mem_address1, uint16_t data_amount ){
 
 	DMA_Stream->NDTR = data_amount;
 
@@ -130,62 +161,80 @@ void DMA_Config(uint32_t perih_address, uint32_t mem_address , uint16_t data_amo
 
 	DMA_Stream->M0AR = mem_address;
 
+	DMA_Stream->M1AR = mem_address1;
+
 	DMA_Stream->CR |= DMA_SxCR_EN;
 
 
 }
 
+
+void Data_Put(char *a , uint16_t *buf){
+
+	while(*a){
+	uint8_t b = (uint8_t) *a++;
+
+	uint16_t mask = 0x0020; // маска для установки бита
+	for(int i = 0; i < 8; i++) { // цикл по 8 элементам массива
+		  buf[i+1] = buf[i+1] & ~mask; // сбрасываем 6-й бит значения i-го элемента массива
+		  buf[i+1] = buf[i+1] | ((b >> i) & 0x01) << 5; // помещаем i-й бит из c в 6-й бит значения i-го элемента массива
+	}
+		break;
+	}
+
+
+
+}
+
+void Data_Put1(char *a , uint16_t *buf){
+
+	while(*a){
+	uint8_t b = (uint8_t) *a++;
+
+	uint16_t mask = 0x0020; // маска для установки бита
+	for(int i = 0; i < 8; i++) { // цикл по 8 элементам массива
+		  buf[i+1] = buf[i+1] & ~mask; // сбрасываем 6-й бит значения i-го элемента массива
+		  buf[i+1] = buf[i+1] | ((b >> i) & 0x01) << 5; // помещаем i-й бит из c в 6-й бит значения i-го элемента массива
+	}
+	}
+
+
+
+}
+
+
+
 int main(void)
 {
-
+	//char *a = "Hello";
+	char *c = a;
 	GPIO_Init();
 	DMA_Init();
-	DMA_Config( (uint32_t) &GPIOA->ODR , (uint32_t) buf, SIZE);
+	DMA_Config( (uint32_t) &GPIOA->ODR , (uint32_t) buf, (uint32_t) buf1, SIZE);
 	TIM1_Init();
 	SysTick_Config(SystemCoreClock/1000);
+	Data_Put(a, buf);
+	//Data_Put(a+1, buf1);
+
+
+
+
 	TIM1->DIER |= TIM_DIER_UDE;// Update dma // Включаем запрос DMA по обновлению таймера
-	//TIM1->CR1 |= TIM_CR1_CEN; // включаем таймер TIM2
+	TIM1->CR1 |= TIM_CR1_CEN; // включаем таймер TIM2
 	DMA2->HISR |= DMA_HISR_TCIF5;
-	uint8_t Flag = 0x00;
 
-	//NVIC_EnableIRQ(DMA1_Stream7_IRQn);
+	NVIC_EnableIRQ(DMA2_Stream5_IRQn);
 
 
-	char *a = "Hello";
-	char *c = a;
+
 
 
 
 
 
 	while(1){
-
-		//if(DMA2->HISR &= DMA_HISR_TCIF5){
-			//TIM1->CR1 &= ~TIM_CR1_CEN; // включаем таймер TIM2
-
-			while(*a){
-			uint8_t b = (uint8_t) *a++;
-			//uint16_t buf[8] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}; // исходный массив
-
-			uint16_t mask = 0x0020; // маска для установки бита
-			for(int i = 0; i < 8; i++) { // цикл по 8 элементам массива
-				  buf[i+1] = buf[i+1] & ~mask; // сбрасываем 6-й бит значения i-го элемента массива
-				  buf[i+1] = buf[i+1] | ((b >> i) & 0x01) << 5; // помещаем i-й бит из c в 6-й бит значения i-го элемента массива
-			}
-
-
-			TIM1->CR1 |= TIM_CR1_CEN; // включаем таймер TIM2
-			delay_ms(1000);
-
-			}
-		//}
-			a = c;
-
-		//delay_ms(1);
-
-
-
-		}
+		delay_ms(1000);
+	}
 }
 
 
