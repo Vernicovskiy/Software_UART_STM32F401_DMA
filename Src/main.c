@@ -15,7 +15,6 @@ char a[] = "Hello\n";
 
 #define rx_size (sizeof(a)-1)
 
-char rx_buffer[rx_size];
 
 uint8_t i = 1;
 uint8_t rx_index = 0;
