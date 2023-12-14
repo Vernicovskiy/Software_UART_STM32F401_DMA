@@ -3,15 +3,22 @@
 
 #define DMA_Stream DMA2_Stream5
 
+
 #define SIZE 10 // Размер буфера для передачи данных
 
 uint16_t buf[SIZE] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0020};
 
 uint16_t buf1[SIZE] = {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0020};
 
-char *a = "Hello\n";
+char a[] = "Hello\n";
+
+
+#define rx_size (sizeof(a)-1)
+
+char rx_buffer[rx_size];
 
 uint8_t i = 1;
+uint8_t rx_index = 0;
 
 void Data_Put(char *a, uint16_t *buf);
 
@@ -21,13 +28,18 @@ void GPIO_Init(){
 
 		RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN; //Тактирование на порт A
 
-		GPIOA->MODER &= ~0x00000C00; // очистили режим для нужного пина
+		GPIOA->MODER &= ~GPIO_MODER_MODER5; // очистили режим для нужного пина
 
 		GPIOA->MODER |= GPIO_MODER_MODER5_0; // пин на выход
 
 		GPIOA->OSPEEDR |= (GPIO_OSPEEDR_OSPEED5_0 | GPIO_OSPEEDR_OSPEED5_1 ); // скорость very high
 
 		GPIOA->BSRR = GPIO_BSRR_BS5; // установили в высокое состояние (мы передатчик)
+
+		// UART
+		GPIOA->MODER |= GPIO_MODER_MODER3_1; //режим альтернативной функции
+
+		GPIOA->AFR[0] |= (GPIO_AFRL_AFRL3_0 | GPIO_AFRL_AFRL3_1 | GPIO_AFRL_AFRL3_2); // Альтернативная функция для приемника
 
 
 		}
@@ -41,7 +53,7 @@ void TIM1_Init(void)
 
 		TIM1->PSC = 0; // Prescaler
 
-		TIM1->ARR = 1666 - 1; // Auto-reload value для 9600 Baud rate
+		TIM1->ARR = 1667 - 1; // Auto-reload value для 9600 Baud rate
 
 		TIM1->EGR |= TIM_EGR_UG; // Очистили теневые регистры
 
@@ -52,9 +64,39 @@ void TIM1_Init(void)
 }
 
 
-/*void fillbuf(uint16_t *buf){
 
-}*/
+void USART_init() { // включаем USART2 PA3
+
+		RCC->APB1ENR |= RCC_APB1ENR_USART2EN; // Вкл тактирование
+
+		USART2->BRR = 0x683; //Задали частоту работы
+
+		USART2->CR1 |= (USART_CR1_RE | USART_CR1_RXNEIE); // Настроили на чтение
+
+		USART2->CR1 |= USART_CR1_UE; //Вкл USART
+
+		NVIC_EnableIRQ(USART2_IRQn); // глобальные прерывания
+
+}
+
+void USART2_IRQHandler (void)
+{
+	 if (USART2->SR & USART_SR_RXNE)
+	 {
+
+		 a[rx_index++] = (char) USART2->DR; // заменяем символ в передаваемой строке по порядку
+
+		 if(rx_index == rx_size-1) rx_index = 0; // если дошли до конца строки то переходим вначало
+	 }
+ }
+
+void FillBuf(char* data, uint16_t *buf) // функция для заполнения чередующихся буферов
+{
+	Data_Put(data + i, buf);
+	i++;
+	if (i > (strlen(data) - 1)) i = 0;
+
+}
 
 
 void DMA2_Stream5_IRQHandler(void){
@@ -62,17 +104,15 @@ void DMA2_Stream5_IRQHandler(void){
 
 	if (READ_BIT(DMA2->HISR, DMA_HISR_HTIF5)){ // половина буфера передалось
 
-		if(!(DMA_Stream->CR & DMA_SxCR_CT))
+		if(!(DMA_Stream->CR & DMA_SxCR_CT)) // первый источник памяти
 		{
-			Data_Put(a+i, buf1);
-			i++;
-			if(i>(strlen(a)-1)) i = 0;
+			FillBuf(a,buf1); // передали половину первого буфера , заполнили второй
+
 		}
-		else if ((DMA_Stream->CR & DMA_SxCR_CT))
+		else if ((DMA_Stream->CR & DMA_SxCR_CT)) // второй источник памяти
 		{
-			Data_Put(a+i, buf);
-			i++;
-			if(i>(strlen(a)-1)) i = 0;
+			FillBuf(a,buf); // передали половину второго буфера , заполнили первый
+
 		}
 
 		DMA2->HIFCR |= DMA_HIFCR_CHTIF5; // очистили флаг
@@ -84,8 +124,7 @@ void DMA2_Stream5_IRQHandler(void){
 
 		DMA2->HIFCR |= DMA_HIFCR_CTCIF5; // очистили флаг
 
-		TIM1->CNT = 0; //есть вопросы..
-		asm("NOP");
+		TIM1->CNT = 0;
 
 
 
@@ -143,7 +182,7 @@ void Data_Put(char *a , uint16_t *buf){
 
 	uint8_t b = (uint8_t) *a;
 
-	uint16_t mask = 0x0020; // маска для установки бита
+	uint16_t mask = 0x0020; // маска для бита
 
 	for(int i = 0; i < 8; i++) // цикл по 8 элементам массива
 	{
@@ -158,6 +197,7 @@ void Data_Put(char *a , uint16_t *buf){
 
 int main(void)
 {
+	USART_init();
 	Data_Put(a, buf); // первый раз заполняем первый буфер
 	GPIO_Init();
 	TIM1_Init();
